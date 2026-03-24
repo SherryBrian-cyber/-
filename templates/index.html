@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>公众号排版校对助手</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>公众号排版校对助手</h1>
+      <p>上传 Word 文档，自动排版成公众号易读格式；支持逐段手动删减与修改。</p>
+    </header>
+
+    <section class="panel">
+      <h2>1) 上传并自动排版</h2>
+      <form id="uploadForm">
+        <input id="docxFile" type="file" accept=".docx" required />
+        <button type="submit">开始排版</button>
+        <button type="button" id="clearBtn" class="secondary">清空</button>
+      </form>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section class="panel">
+      <h2>2) 手动校对与编辑</h2>
+      <div id="editor"></div>
+      <div class="toolbar">
+        <button id="addBlockBtn" type="button" class="secondary">新增空段落</button>
+        <button id="exportBtn" type="button">导出 Markdown</button>
+        <button id="exportHtmlBtn" type="button" class="secondary">导出 HTML</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>3) Markdown 预览</h2>
+      <pre id="preview"></pre>
+    </section>
+  </main>
+
+  <template id="blockTemplate">
+    <article class="block-card">
+      <div class="row">
+        <label>类型
+          <select class="kind">
+            <option value="title">title</option>
+            <option value="subtitle">subtitle</option>
+            <option value="paragraph">paragraph</option>
+            <option value="bullet">bullet</option>
+          </select>
+        </label>
+        <button type="button" class="danger delete">删除</button>
+      </div>
+      <textarea class="text" rows="5" placeholder="请输入段落内容"></textarea>
+    </article>
+  </template>
+
+  <script>
+    const state = { blocks: [] };
+
+    const statusEl = document.getElementById('status');
+    const editorEl = document.getElementById('editor');
+    const previewEl = document.getElementById('preview');
+    const template = document.getElementById('blockTemplate');
+
+    function setStatus(msg, type = 'info') {
+      statusEl.textContent = msg;
+      statusEl.dataset.type = type;
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
+    }
+
+    function toMarkdown(blocks) {
+      const out = [];
+      for (const block of blocks) {
+        const text = block.text.trim();
+        if (!text) continue;
+
+        if (block.kind === 'title') {
+          out.push(`# ${text}`, '');
+        } else if (block.kind === 'subtitle') {
+          out.push(`## ${text.replace(/[：:]$/, '')}`, '');
+        } else if (block.kind === 'bullet') {
+          out.push(`- ${text.replace(/^[-•\s]+/, '')}`);
+        } else {
+          out.push(text.replaceAll('\n', '\n\n'), '');
+        }
+      }
+      return out.join('\n').trim() + '\n';
+    }
+
+    function updatePreview() {
+      previewEl.innerHTML = escapeHtml(toMarkdown(state.blocks));
+    }
+
+    function renderBlocks() {
+      editorEl.innerHTML = '';
+
+      if (!state.blocks.length) {
+        editorEl.innerHTML = '<p class="empty">暂无内容，请先上传文档。</p>';
+        updatePreview();
+        return;
+      }
+
+      state.blocks.forEach((block, index) => {
+        const node = template.content.firstElementChild.cloneNode(true);
+        const kindEl = node.querySelector('.kind');
+        const textEl = node.querySelector('.text');
+        const delEl = node.querySelector('.delete');
+
+        kindEl.value = block.kind;
+        textEl.value = block.text;
+
+        kindEl.addEventListener('change', (e) => {
+          state.blocks[index].kind = e.target.value;
+          updatePreview();
+        });
+
+        textEl.addEventListener('input', (e) => {
+          state.blocks[index].text = e.target.value;
+          updatePreview();
+        });
+
+        delEl.addEventListener('click', () => {
+          state.blocks.splice(index, 1);
+          renderBlocks();
+        });
+
+        editorEl.appendChild(node);
+      });
+
+      updatePreview();
+    }
+
+    async function downloadFromApi(endpoint, filename, errorMessage, successMessage) {
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocks: state.blocks }),
+      });
+
+      if (!resp.ok) {
+        setStatus(errorMessage, 'error');
+        return;
+      }
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus(successMessage, 'success');
+    }
+
+    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const file = document.getElementById('docxFile').files[0];
+      if (!file) {
+        setStatus('请先选择 .docx 文件。', 'error');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      setStatus('正在处理文档，请稍候...');
+      const resp = await fetch('/api/format', { method: 'POST', body: formData });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        setStatus(data.error || '处理失败', 'error');
+        return;
+      }
+
+      state.blocks = data.blocks || [];
+      setStatus(`已自动排版 ${data.count} 段内容，可继续人工校对。`, 'success');
+      renderBlocks();
+    });
+
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      state.blocks = [];
+      renderBlocks();
+      setStatus('内容已清空。');
+    });
+
+    document.getElementById('addBlockBtn').addEventListener('click', () => {
+      state.blocks.push({ kind: 'paragraph', text: '' });
+      renderBlocks();
+    });
+
+    document.getElementById('exportBtn').addEventListener('click', async () => {
+      await downloadFromApi('/api/export', 'wechat_article.md', 'Markdown 导出失败，请稍后重试。', 'Markdown 已导出。');
+    });
+
+    document.getElementById('exportHtmlBtn').addEventListener('click', async () => {
+      await downloadFromApi('/api/export_html', 'wechat_article.html', 'HTML 导出失败，请稍后重试。', 'HTML 已导出。');
+    });
+
+    renderBlocks();
+  </script>
+</body>
+</html>
