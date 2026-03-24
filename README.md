@@ -23,6 +23,18 @@ python app.py
 
 启动后访问：`http://localhost:5000`
 
+## 生成可直接访问的公网链接（临时）
+
+如果你希望别人直接通过链接访问（无需在对方电脑安装环境），可使用脚本自动生成临时公网地址：
+
+```bash
+bash scripts/share_localhost_run.sh
+```
+
+运行后终端会输出一个 `https://xxxx.localhost.run` 的地址，直接发给他人即可访问。
+
+> 注意：这是临时隧道链接，关闭终端或中断脚本后链接会失效。
+
 ## 使用流程
 
 1. 上传 Word 文档（`.docx`）。
@@ -36,6 +48,7 @@ python app.py
 - `formatter.py`：排版规则与 Markdown 输出。
 - `templates/index.html`：前端页面结构与交互逻辑。
 - `static/style.css`：页面样式。
+- `scripts/share_localhost_run.sh`：生成临时公网访问链接。
 
 ## 说明
 
